@@ -20,7 +20,7 @@ CHROMA_DIR = os.getenv("CHROMA_DIR", os.path.join(BASE_DIR, "chroma_db"))
 COLLECTION_NAME = os.getenv("CHROMA_COLLECTION", "quickstart2")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:0.6b")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "scb10x/llama3.2-typhoon2-1b-instruct:latest")
 
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(CHROMA_DIR, exist_ok=True)
