@@ -103,14 +103,24 @@ def simple_bench(title, vector_store):
 # 1) CHROMA
 # -------------------------------------------------------------
 try:
+    import shutil
     import chromadb
     from chromadb.config import Settings
     from llama_index.vector_stores.chroma import ChromaVectorStore
 
-    os.makedirs("chroma_data", exist_ok=True)
-    client = chromadb.PersistentClient(path="chroma_data", settings=Settings(anonymized_telemetry=False))
+    CHROMA_DIR = ".chroma_database"
+    if os.path.exists(CHROMA_DIR):
+        print("[Chroma] ล้างโฟลเดอร์เก่า:", CHROMA_DIR)
+        shutil.rmtree(CHROMA_DIR)
+    os.makedirs(CHROMA_DIR, exist_ok=True)
+
+    client = chromadb.PersistentClient(
+        path=CHROMA_DIR,
+        settings=Settings(anonymized_telemetry=False)
+    )
 
     CHROMA_COLL = os.getenv("CHROMA_COLLECTION", "quick_chroma")
+
     try:
         client.delete_collection(CHROMA_COLL)
     except:
@@ -125,16 +135,24 @@ except Exception as e:
     print(f"[Chroma] ERROR: {e}")
 
 
+
 # -------------------------------------------------------------
 # 2) QDRANT (embedded)
 # -------------------------------------------------------------
 try:
+    import shutil
     import qdrant_client
     from qdrant_client.http import models as qm
     from llama_index.vector_stores.qdrant import QdrantVectorStore
 
-    os.makedirs("qdrant_local", exist_ok=True)
-    qc = qdrant_client.QdrantClient(path="qdrant_local")
+    QDRANT_DIR = ".qdrant_database"
+
+    if os.path.exists(QDRANT_DIR):
+        print("[Qdrant] ล้างโฟลเดอร์เก่า:", QDRANT_DIR)
+        shutil.rmtree(QDRANT_DIR)
+    os.makedirs(QDRANT_DIR, exist_ok=True)
+
+    qc = qdrant_client.QdrantClient(path=QDRANT_DIR)
 
     QDRANT_COLL = os.getenv("QDRANT_COLLECTION", "quick_qdrant")
 
@@ -154,17 +172,31 @@ except Exception as e:
     print(f"[Qdrant] ERROR: {e}")
 
 
+
 # -------------------------------------------------------------
-# 3) FAISS (in-memory)
+# 3) FAISS
 # -------------------------------------------------------------
 try:
+    import shutil
     import faiss
     from llama_index.vector_stores.faiss import FaissVectorStore
 
-    faiss_index = faiss.IndexFlatIP(EMBED_DIM)  # ใช้ cosine (เพราะ normalize=True)
+    FAISS_DIR = ".faiss_database"
+    FAISS_PATH = os.path.join(FAISS_DIR, "index.bin")
+
+    if os.path.exists(FAISS_DIR):
+        print("[FAISS] ล้างโฟลเดอร์เก่า:", FAISS_DIR)
+        shutil.rmtree(FAISS_DIR)
+    os.makedirs(FAISS_DIR, exist_ok=True)
+
+    faiss_index = faiss.IndexFlatIP(EMBED_DIM)
     faiss_vs = FaissVectorStore(faiss_index=faiss_index)
 
-    simple_bench("FAISS (local)", faiss_vs)
+    simple_bench("FAISS (new, store-only)", faiss_vs)
+
+    faiss.write_index(faiss_index, FAISS_PATH)
+    print(f"[FAISS] บันทึก index ลง: {FAISS_PATH}")
 
 except Exception as e:
     print(f"[FAISS] ERROR: {e}")
+
