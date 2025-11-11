@@ -1,0 +1,10 @@
+# ----- ของที่ชอบอัป dependency ของ Colab -----
+# (ลงแบบ --no-deps เพื่อไม่ให้มันไปอัปของหลัก)
+llama-index-core>=0.13,<0.15
+llama-index-llms-ollama==0.7.4
+llama-index-embeddings-huggingface>=0.4,<1
+llama-index-readers-file>=0.2,<1
+chromadb==0.5.4
+sentence-transformers>=3,<4
+transformers>=4.44,<5
+torch

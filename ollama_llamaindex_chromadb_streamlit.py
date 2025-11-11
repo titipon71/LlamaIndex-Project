@@ -1,4 +1,6 @@
+# ollama_llamaindex_chromadb_streamlit.py
 import os
+import re
 from typing import List
 
 import streamlit as st
@@ -20,14 +22,14 @@ CHROMA_DIR = os.getenv("CHROMA_DIR", os.path.join(BASE_DIR, "chroma_db"))
 COLLECTION_NAME = os.getenv("CHROMA_COLLECTION", "quickstart2")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "scb10x/llama3.2-typhoon2-1b-instruct:latest")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:0.6b")
 
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(CHROMA_DIR, exist_ok=True)
 
-st.set_page_config(page_title="RAG (Streamlit)", page_icon="🤖", layout="wide")
-st.title("RAG Web UI (Streamlit)")
-st.caption("LlamaIndex + Chroma + Ollama")
+st.set_page_config(page_title="ผู้ช่วยค้นหาจากเอกสาร (RAG)", page_icon="🤖", layout="wide")
+st.title("ผู้ช่วยค้นหาจากเอกสาร")
+st.caption("อัปโหลดไฟล์ → สร้างฐานความรู้ → ถามคำถามเป็นภาษาไทย")
 
 # ---------- cached resources ----------
 @st.cache_resource(show_spinner=False)
@@ -35,12 +37,21 @@ def get_embed_model():
     return HuggingFaceEmbedding(model_name=EMBED_MODEL, device="cuda", trust_remote_code=True)
 
 @st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner=False)
 def get_llm():
     return Ollama(
         model=OLLAMA_MODEL,
         base_url=OLLAMA_BASE_URL,
-        request_timeout=120.0,
-        additional_kwargs={"options": {"num_gpus": 1}}
+        request_timeout=60.0,
+        context_window=8192,
+        num_output=512,
+        additional_kwargs={
+            "options": {
+                "num_gpus": 1,
+                "temperature": 0.4,
+                "top_p": 0.9,
+            }
+        },
     )
 
 def _list_data_files() -> list[str]:
@@ -57,7 +68,7 @@ def _ensure_sample_if_empty() -> List[Document]:
         sample_path = os.path.join(DATA_DIR, "sample.txt")
         if not os.path.exists(sample_path):
             with open(sample_path, "w", encoding="utf-8") as f:
-                f.write("สวัสดี! ใส่ไฟล์ลง data/ แล้วกด Rebuild Index\n")
+                f.write("สวัสดี! ใส่ไฟล์ลงโฟลเดอร์ data/ แล้วกด “สร้างฐานความรู้ใหม่จากไฟล์ที่เลือก”\n")
         docs = SimpleDirectoryReader(DATA_DIR).load_data()
     return docs
 
@@ -100,32 +111,35 @@ def build_index(docs: List[Document] | None = None) -> VectorStoreIndex:
 
 def clear_collection():
     chroma_client = _get_chroma_client()
-    # ลบ collection เดิม
+    # ลบฐานข้อมูลเดิมทั้งหมด
     try:
         chroma_client.delete_collection(COLLECTION_NAME)
     except Exception:
         pass
-    # สร้างใหม่ทันที เพื่อให้ build_index ครั้งถัดไปเจอแน่ ๆ
     chroma_client.create_collection(COLLECTION_NAME)
 
 # --------- Sidebar: Files + Upload + Actions ---------
 with st.sidebar:
-    st.header("ไฟล์เอกสาร")
+    st.header("ไฟล์สำหรับสร้างฐานความรู้")
 
-    up = st.file_uploader("อัปโหลดไฟล์ (จะถูกเก็บใน data/)", accept_multiple_files=True)
+    up = st.file_uploader(
+        "อัปโหลดไฟล์ของคุณ",
+        accept_multiple_files=True,
+        help="ไฟล์จะถูกเก็บในโฟลเดอร์ data/ เพื่อใช้สร้างฐานความรู้"
+    )
     if up:
         for f in up:
             dest = os.path.join(DATA_DIR, f.name)
             with open(dest, "wb") as out:
                 out.write(f.read())
-        st.success(f"อัปโหลด {len(up)} ไฟล์แล้ว — อย่าลืม Rebuild Index")
+        st.success(f"อัปโหลด {len(up)} ไฟล์แล้ว — กด “สร้างฐานความรู้ใหม่จากไฟล์ที่เลือก” ด้านล่าง")
 
-    st.subheader("เลือกไฟล์ที่จะใช้สร้างดัชนี")
+    st.subheader("เลือกไฟล์ที่จะใช้สร้างฐานความรู้")
 
     files_in_data = _list_data_files()
 
     if "selected_files" not in st.session_state:
-        st.session_state.selected_files = set(files_in_data)
+        st.session_state.selected_files = set()
 
     new_selected = set(st.session_state.selected_files)
 
@@ -139,51 +153,61 @@ with st.sidebar:
 
     st.session_state.selected_files = new_selected
 
-    st.caption(f"เลือกแล้ว: {len(st.session_state.selected_files)} / {len(files_in_data)}")
+    st.caption(f"เลือกแล้ว {len(st.session_state.selected_files)} จากทั้งหมด {len(files_in_data)} ไฟล์")
 
-    # Rebuild จากไฟล์ที่เลือก
-    if st.button("Rebuild Index จากไฟล์ที่เลือก", use_container_width=True):
+    # สร้างฐานความรู้ใหม่จากไฟล์ที่เลือก
+    if st.button("สร้างฐานความรู้ใหม่จากไฟล์ที่เลือก", use_container_width=True,
+                 help="ใช้ไฟล์ที่เลือกเพื่อสร้างข้อมูลสำหรับตอบคำถาม (ทับของเดิมเฉพาะส่วนที่เกี่ยวข้อง)"):
         build_index.clear()
         st.cache_resource.clear()
 
         docs = _load_docs_from_selected(list(st.session_state.selected_files))
         _ = build_index(docs=docs)
-        st.success("Rebuild จากไฟล์ที่เลือก สำเร็จ ✅")
+        st.success("สร้างฐานความรู้จากไฟล์ที่เลือกเรียบร้อย ✅")
 
-    # ล้าง collection
-    if st.button("ล้าง Collection (Chroma)", use_container_width=True):
+    # ล้างฐานความรู้ทั้งหมด
+    st.divider()
+    st.markdown("### การจัดการฐานความรู้")
+    st.caption("เมื่อล้างฐานความรู้ ข้อมูลที่จัดทำไว้จะถูกลบทั้งหมด แต่ไฟล์ต้นฉบับยังอยู่ในโฟลเดอร์ data/")
+
+    if st.button("ล้างฐานความรู้ทั้งหมด", use_container_width=True,
+                 help="ลบข้อมูลที่สร้างไว้ทั้งหมด (ไฟล์ต้นฉบับใน data/ ไม่ถูกลบ)"):
         clear_collection()
         build_index.clear()
         st.cache_resource.clear()
-        st.success("ล้าง Collection เรียบร้อย 🧹")
+        st.success("ล้างฐานความรู้เรียบร้อย 🧹")
 
 # --------- Main Q&A ---------
-question = st.text_area("คำถาม", placeholder="พิมพ์คำถามที่นี่...", height=100)
-if st.button("ถาม", type="primary"):
+question = st.text_area(
+    "พิมพ์คำถามของคุณ",
+    placeholder="เช่น \"สรุปเนื้อหาสำคัญจากเอกสาร\"",
+    height=100
+)
+if st.button("ค้นหาคำตอบ", type="primary"):
     if not question.strip():
-        st.error("กรุณาพิมพ์คำถาม")
+        st.error("กรุณาพิมพ์คำถามก่อน")
     else:
-        # 🟣 ตรงนี้คือจุดแก้สำคัญ — ใช้ไฟล์ที่เลือกมาสร้าง index
+        # ใช้ไฟล์ที่เลือกมาสร้าง index
         selected_files = list(st.session_state.get("selected_files", []))
         docs = _load_docs_from_selected(selected_files)
 
-        # เคลียร์ build_index ถ้าอยากบังคับให้สร้างจาก docs ชุดนี้ทุกครั้งก็ได้
-        # build_index.clear()
-
-        with st.spinner("กำลังค้นและสรุปคำตอบ..."):
+        with st.spinner("กำลังค้นหาจากไฟล์และสรุปคำตอบ..."):
             qe = build_index(docs=docs).as_query_engine(llm=get_llm())
             resp = qe.query(question)
 
         st.subheader("คำตอบ")
-        st.write(str(resp))
+        # แปลงผลลัพธ์เป็นสตริง แล้วลบแท็ก <think>...</think>
+        clean_resp = re.sub(r"<think>.*?</think>", "", str(resp), flags=re.DOTALL)
+        clean_resp = clean_resp.strip()
+        st.write(clean_resp)
 
         src_nodes = getattr(resp, "source_nodes", []) or []
-        st.subheader("แหล่งที่มา")
+        st.subheader("แหล่งข้อมูลอ้างอิง")
         if not src_nodes:
-            st.caption("ไม่มีรายละเอียดแหล่งที่มาพร้อมใช้งาน")
+            st.caption("ไม่มีข้อมูลอ้างอิงที่จะแสดง")
         else:
             for i, n in enumerate(src_nodes, 1):
-                with st.expander(f"แหล่งที่มา #{i} • score={getattr(n, 'score', None)}"):
+                with st.expander(f"แหล่งอ้างอิง #{i} • score={getattr(n, 'score', None)}"):
                     text_preview = (n.get_text() or "")[:1000] if hasattr(n, "get_text") else ""
                     st.code(text_preview)
                     meta = getattr(n.node, "metadata", {}) if hasattr(n, "node") else {}

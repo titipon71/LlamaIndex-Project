@@ -36,9 +36,13 @@ llm = Ollama(
     model=OLLAMA_MODEL,
     base_url=OLLAMA_BASE_URL,   # สำคัญถ้าไม่ได้ใช้ค่า default
     request_timeout=60.0,
-    additional_kwargs={"options": {
-      "num_gpus": 1,  
-      }}  
+    additional_kwargs={
+            "options": {
+                "num_gpu": 1,
+                "temperature": 0.4,
+                "top_p": 0.9,
+            }
+        },
 )
 
 # ----- ตั้งค่า Vector Store (Chroma Persistent) -----
@@ -47,8 +51,8 @@ from llama_index.vector_stores.chroma import ChromaVectorStore
 from chromadb.config import Settings
 
 chroma_client = chromadb.PersistentClient(path=CHROMA_DIR, settings=Settings(anonymized_telemetry=False))
-# ใช้ชื่อ collection ควรเป็น unique/สอดคล้องโปรเจกต์
 collection_name = "quickstart2"
+
 # ถ้ามีอยู่แล้วจะเปิดใช้ต่อ
 try:
     chroma_collection = chroma_client.get_collection(collection_name)
